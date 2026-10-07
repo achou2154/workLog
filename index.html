@@ -77,7 +77,7 @@ td.c{text-align:center;white-space:nowrap}
         <div class="f"><label for="empPin">개인번호 (숫자 4~8자리)</label>
           <input id="empPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="본인 확인용"></div>
         <div class="f"><label for="empDate">날짜</label><input id="empDate" type="date"></div>
-        <button class="pri" id="btnLoad">불러오기</button>
+        <button class="pri" id="btnLoad">작성</button>
       </div>
       <div id="pinHint" class="hint" style="margin-top:6px">처음 사용하시면 입력하신 번호가 본인 개인번호로 등록됩니다. 본인 내역은 이 번호로만 볼 수 있습니다.</div>
       <div id="empMsg" class="msg"></div>
@@ -457,24 +457,55 @@ $('btnExport').onclick = async () => {
 
   const wb = new ExcelJS.Workbook();
 
-  // 1) 전체 종합 (한 줄에 한 건 - 필터/피벗용)
-  const all = wb.addWorksheet('전체 종합', {views:[{showGridLines:false}]});
-  [4,10.4,7.9,12,7.3,65.6,13].forEach((w,i)=> all.getColumn(i+1).width = w);
-  all.getCell('B2').value = `업무일지 종합 (${period})`; all.getCell('B2').font = {...F, bold:true};
-  ['날짜','요일','직원','구분','내용','투입시간(Hr)'].forEach((h,i)=>{
+  // 줄바꿈이 필요한 내용의 행 높이 (글자 폭 기준 추정, 한글은 2칸)
+  const lineH = (txt, cap=74) => {
+    let n = 0;
+    String(txt==null?'':txt).split('\n').forEach(seg => { let w = 0; for (const ch of seg) w += ch.charCodeAt(0) > 255 ? 2 : 1; n += Math.max(1, Math.ceil(w/cap)); });
+    return n;
+  };
+  const fitRow = (ws, rn, txt) => { const n = lineH(txt); if (n > 1) ws.getRow(rn).height = 16.5*n; };
+
+  // 1) 전체 종합 : 날짜 → 직원 순서로 묶어서 표시 (날짜·직원 칸 병합)
+  const all = wb.addWorksheet('전체 종합', {views:[{showGridLines:false}], pageSetup:{orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0}});
+  [4,10.375,12,7.25,65.625,13].forEach((w,i)=> all.getColumn(i+1).width = w);
+  all.mergeCells('B1:F1');
+  const tc = all.getCell('B1'); tc.value = `JM 업무일지 종합 (${period})`;
+  tc.font = {name:'맑은 고딕', size:20, bold:true, color:{argb:'FFFFFFFF'}};
+  tc.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF333F50'}};
+  tc.alignment = {horizontal:'center', vertical:'middle'};
+  all.getRow(1).height = 31.5;
+  ['날짜','직원','구분','내용','투입시간(Hr)'].forEach((h,i)=>{
     const c = all.getCell(3, i+2); c.value = h; c.font = F; c.fill = HDR; c.border = BD; c.alignment = {horizontal:'center',vertical:'middle'};
   });
-  rows.slice().sort((a,b)=> a.log_date.localeCompare(b.log_date) || names.indexOf(a.emp_name)-names.indexOf(b.emp_name) || a.seq-b.seq)
-    .forEach((r,i)=>{
-      const rn = 4+i;
-      const vals = [utc(r.log_date), wdOf(r.log_date), r.emp_name, r.seq, r.content, r.hours];
-      vals.forEach((v,j)=>{
-        const c = all.getCell(rn, j+2); c.value = v; c.font = F; c.border = BD;
-        c.alignment = {horizontal: j===4?'left':'center', vertical:'middle', wrapText: j===4};
-        if (j===0) c.numFmt = 'm"/"d;@';
+  const sorted = rows.slice().sort((x,y)=> x.log_date.localeCompare(y.log_date) || names.indexOf(x.emp_name)-names.indexOf(y.emp_name) || x.seq-y.seq);
+  const med = {style:'medium'};
+  let rn = 4;
+  [...new Set(sorted.map(r=>r.log_date))].forEach(ds => {
+    const dStart = rn;
+    [...new Set(sorted.filter(r=>r.log_date===ds).map(r=>r.emp_name))].forEach(en => {
+      const its = sorted.filter(r=>r.log_date===ds && r.emp_name===en);
+      const s0 = rn, e0 = rn + its.length - 1;
+      its.forEach(it => {
+        const vals = [null, null, it.seq, it.content, it.hours];
+        vals.forEach((v,j)=>{
+          const c = all.getCell(rn, j+2); if (v!==null) c.value = v; c.font = F;
+          c.alignment = {horizontal: j===3?'left':'center', vertical:'middle', wrapText: j===3};
+        });
+        fitRow(all, rn, it.content);
+        rn++;
       });
+      all.getCell(s0,3).value = en;
+      if (e0 > s0) all.mergeCells(s0,3,e0,3);
+      // 직원별 블록 바깥선(굵은선): C~F 열
+      for (let r2=s0; r2<=e0; r2++) for (let c2=3; c2<=6; c2++)
+        all.getCell(r2,c2).border = {left:thin, right: c2===6?med:thin, top: r2===s0?med:thin, bottom: r2===e0?med:thin};
     });
-  all.autoFilter = {from:{row:3,column:2}, to:{row:3,column:7}};
+    const dEnd = rn - 1;
+    all.getCell(dStart,2).value = utc(ds); all.getCell(dStart,2).numFmt = 'm"/"d;@';
+    if (dEnd > dStart) all.mergeCells(dStart,2,dEnd,2);
+    for (let r2=dStart; r2<=dEnd; r2++){ const c = all.getCell(r2,2); c.font = F; c.border = BD; c.alignment = {horizontal:'center', vertical:'middle'}; }
+  });
+  all.autoFilter = {from:{row:3,column:2}, to:{row:3,column:6}};
 
   // 2) 직원별 시트 (서식 그대로)
   const used = new Set(['전체 종합']);
@@ -501,6 +532,7 @@ $('btnExport').onclick = async () => {
           c.alignment = {horizontal: j===3?'left':'center', vertical:'middle', wrapText: j===3};
           if (cells[j]!==null) c.value = cells[j];
         }
+        if (it) fitRow(ws, rn+i, it.content);
       }
       const b = ws.getCell(s,2); b.value = utc(ds); b.numFmt = 'm"/"d;@';
       ws.getCell(s,3).value = wdOf(ds);
