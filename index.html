@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>업무일지</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#fff; --ink:#1f2933; --sub:#667085; --line:#d5dbe3;
+  --pri:#2f6fed; --pri-ink:#fff; --hdr:#ddebf7; --warn:#c2410c; --ok:#15803d; --err:#b42318;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#12161c;--card:#1b2129;--ink:#e6e9ee;--sub:#9aa4b2;--line:#323b47;--pri:#5b8def;--pri-ink:#0b1220;--hdr:#26384d;--warn:#fb923c;--ok:#4ade80;--err:#f87171}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "맑은 고딕","Malgun Gothic",-apple-system,"Apple SD Gothic Neo",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:8px 0 14px}
+h2{font-size:16px;margin:0 0 10px}
+.tabs{display:flex;gap:6px;margin-bottom:14px}
+.tab{flex:1;padding:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer;font:inherit}
+.tab[aria-selected=true]{background:var(--pri);color:var(--pri-ink);border-color:var(--pri);font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.f{display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px}
+label{font-size:13px;color:var(--sub)}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px;width:100%}
+textarea{resize:vertical;min-height:44px}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px}
+button.pri{background:var(--pri);color:var(--pri-ink);border-color:var(--pri);font-weight:700}
+button.sm{padding:4px 10px;font-size:13px}
+button:disabled{opacity:.5;cursor:default}
+.msg{margin:8px 0 0;font-size:14px;min-height:20px}
+.msg.err{color:var(--err)} .msg.ok{color:var(--ok)} .hint{color:var(--sub);font-size:13px}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top}
+th{background:var(--hdr);font-weight:600;text-align:center;white-space:nowrap}
+td.c{text-align:center;white-space:nowrap}
+.editor td{padding:4px}
+.editor td.no{width:44px;text-align:center;vertical-align:middle}
+.editor td.hr{width:96px}
+.editor td.x{width:40px;text-align:center;vertical-align:middle}
+.total{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px;flex-wrap:wrap}
+.total b{font-size:17px}
+.tbl-scroll{overflow-x:auto}
+.hist .d{cursor:pointer}
+.hist .d:hover td{background:color-mix(in srgb,var(--pri) 8%,transparent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:13px}
+.chip.no{border-color:var(--warn);color:var(--warn)}
+.hidden{display:none!important}
+.pre{white-space:pre-wrap}
+.setup{border-color:var(--warn)}
+@media (max-width:600px){ .wrap{padding:10px} th,td{padding:5px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>업무일지</h1>
+
+  <div id="setupWarn" class="card setup hidden">
+    <b>아직 서버 연결 설정이 안 되어 있습니다.</b>
+    <div class="hint">index.html 위쪽의 <code>SUPABASE_URL</code>, <code>SUPABASE_KEY</code> 값을 입력해 주세요. (설치 방법 문서 참고)</div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tabEmp" role="tab" aria-selected="true">직원 입력</button>
+    <button class="tab" id="tabAdm" role="tab" aria-selected="false">관리자</button>
+  </div>
+
+  <!-- ===================== 직원 ===================== -->
+  <section id="viewEmp">
+    <div class="card">
+      <h2>접속</h2>
+      <div class="row">
+        <div class="f"><label for="empName">이름</label><select id="empName"></select></div>
+        <div class="f"><label for="empPin">개인번호 (숫자 4~8자리)</label>
+          <input id="empPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="본인 확인용"></div>
+        <div class="f"><label for="empDate">날짜</label><input id="empDate" type="date"></div>
+        <button class="pri" id="btnLoad">불러오기</button>
+      </div>
+      <div id="pinHint" class="hint" style="margin-top:6px">처음 사용하시면 입력하신 번호가 본인 개인번호로 등록됩니다. 본인 내역은 이 번호로만 볼 수 있습니다.</div>
+      <div id="empMsg" class="msg"></div>
+    </div>
+
+    <div id="editorCard" class="card hidden">
+      <h2 id="editorTitle"></h2>
+      <div class="tbl-scroll">
+        <table class="editor">
+          <thead><tr><th>구분</th><th>내용</th><th>투입시간(Hr)</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="total">
+        <div><button class="sm" id="btnAddRow">+ 항목 추가</button></div>
+        <div>합계 <b id="sumHours">0</b> Hr</div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="pri" id="btnSave">등록</button>
+        <span class="hint">같은 날짜에 다시 등록하면 기존 내용이 수정됩니다. 내용을 모두 비우고 등록하면 그 날짜 내역이 삭제됩니다.</span>
+      </div>
+      <div id="saveMsg" class="msg"></div>
+    </div>
+
+    <div id="histCard" class="card hidden">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 id="histTitle" style="margin:0">내 등록 내역</h2>
+        <div><button class="sm" id="histPrev">◀ 이전달</button> <button class="sm" id="histNext">다음달 ▶</button></div>
+      </div>
+      <div class="tbl-scroll" style="margin-top:10px">
+        <table class="hist"><thead><tr><th>날짜</th><th>요일</th><th>내용</th><th>시간 계</th></tr></thead><tbody id="histBody"></tbody></table>
+      </div>
+      <div class="hint" style="margin-top:6px">날짜 줄을 누르면 해당 날짜를 수정할 수 있습니다.</div>
+    </div>
+  </section>
+
+  <!-- ===================== 관리자 ===================== -->
+  <section id="viewAdm" class="hidden">
+    <div id="admLogin" class="card">
+      <h2>관리자 로그인</h2>
+      <div class="row">
+        <div class="f"><label for="admPw">관리자 비밀번호</label><input id="admPw" type="password" autocomplete="off"></div>
+        <button class="pri" id="btnAdmLogin">접속</button>
+      </div>
+      <div id="admLoginMsg" class="msg"></div>
+    </div>
+
+    <div id="admMain" class="hidden">
+      <div class="card">
+        <h2>조회 / 엑셀 추출</h2>
+        <div class="row">
+          <div class="f"><label for="admFrom">시작일</label><input id="admFrom" type="date"></div>
+          <div class="f"><label for="admTo">종료일</label><input id="admTo" type="date"></div>
+          <div class="f"><label for="admEmp">직원</label><select id="admEmp"></select></div>
+          <button class="pri" id="btnAdmQuery">조회</button>
+          <button id="btnExport">엑셀 추출</button>
+          <button id="btnAdmLogout">로그아웃</button>
+        </div>
+        <div id="admMsg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2>제출 현황</h2>
+        <div class="row">
+          <div class="f" style="max-width:200px"><label for="admChk">확인할 날짜</label><input id="admChk" type="date"></div>
+        </div>
+        <div id="chkBox" class="chips"></div>
+      </div>
+
+      <div class="card">
+        <h2>직원별 시간 합계</h2>
+        <div class="tbl-scroll"><table><thead><tr><th>직원</th><th>작성 일수</th><th>투입시간 합계(Hr)</th></tr></thead><tbody id="sumBody"></tbody></table></div>
+      </div>
+
+      <div class="card">
+        <h2>상세 내역</h2>
+        <div class="tbl-scroll"><table><thead><tr><th>날짜</th><th>요일</th><th>직원</th><th>구분</th><th>내용</th><th>시간(Hr)</th></tr></thead><tbody id="admBody"></tbody></table></div>
+      </div>
+
+      <div class="card">
+        <h2>직원 관리</h2>
+        <div class="row" style="margin-bottom:10px">
+          <div class="f"><label for="newEmp">직원 추가 (이름)</label><input id="newEmp" maxlength="30"></div>
+          <button id="btnAddEmp">추가</button>
+        </div>
+        <div class="tbl-scroll"><table><thead><tr><th>이름</th><th>개인번호</th><th></th></tr></thead><tbody id="empMgrBody"></tbody></table></div>
+        <div class="hint" style="margin-top:6px">개인번호를 잊은 직원은 '번호 초기화' 후 다시 접속하면 새 번호를 등록할 수 있습니다. 직원 삭제 시 그 직원의 업무일지도 함께 삭제됩니다.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+/* ============ 설정: Supabase 프로젝트 값 입력 ============ */
+const SUPABASE_URL = 'https://cgmmwmqkkzizwwytmcpn.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnbW13bXFra3ppend3eXRtY3BuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMjkyOTMsImV4cCI6MjEwNjkwNTI5M30.Q3cnvK34wAWzHFvlVogRbJ-1-EJB-ngFOW0U0_U1RP8';
+/* ======================================================== */
+
+const $ = id => document.getElementById(id);
+const WD = ['일','월','화','수','목','금','토'];
+const ERR = {
+  bad_pin:'개인번호가 올바르지 않습니다.',
+  bad_pin_format:'개인번호는 숫자 4~8자리로 입력해 주세요.',
+  locked:'시도 횟수를 초과했습니다. 10분 후 다시 시도해 주세요.',
+  no_employee:'등록되지 않은 이름입니다.',
+  bad_password:'비밀번호가 올바르지 않습니다.',
+  bad_input:'입력값을 확인해 주세요.'
+};
+const configured = !SUPABASE_URL.includes('YOUR-PROJECT');
+if (!configured) $('setupWarn').classList.remove('hidden');
+
+async function rpc(fn, args){
+  if (!configured) throw new Error('서버 연결 설정이 필요합니다.');
+  let r;
+  try{
+    r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+      method:'POST', headers:{'Content-Type':'application/json', apikey:SUPABASE_KEY}, body:JSON.stringify(args||{})
+    });
+  }catch(e){ throw new Error('서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.'); }
+  if (!r.ok) throw new Error('서버 오류 (' + r.status + ')');
+  const j = await r.json();
+  if (!j.ok) throw Object.assign(new Error(ERR[j.error] || j.error), {code:j.error});
+  return j.data;
+}
+const pad = n => String(n).padStart(2,'0');
+const ymd = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const parse = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
+const wdOf = s => WD[parse(s).getDay()];
+const md = s => { const [,m,d] = s.split('-'); return Number(m)+'/'+Number(d); };
+const monthRange = s => { const [y,m] = s.split('-').map(Number); return [ymd(new Date(y,m-1,1)), ymd(new Date(y,m,0))]; };
+const fmtH = n => (Math.round(n*10)/10).toString();
+const msg = (el, text, kind) => { el.textContent = text||''; el.className = 'msg' + (kind?' '+kind:''); };
+const today = ymd(new Date());
+
+/* ---------- 탭 ---------- */
+function showTab(t){
+  const emp = t==='emp';
+  $('viewEmp').classList.toggle('hidden', !emp); $('viewAdm').classList.toggle('hidden', emp);
+  $('tabEmp').setAttribute('aria-selected', emp); $('tabAdm').setAttribute('aria-selected', !emp);
+}
+$('tabEmp').onclick = () => showTab('emp'); $('tabAdm').onclick = () => showTab('adm');
+
+/* =====================================================
+   직원 화면
+   ===================================================== */
+let roster = [];            // [{name, has_pin}]
+let me = null;              // {name, pin}
+let monthCache = {};        // 'YYYY-MM' -> rows
+let curDate = today;
+
+async function loadRoster(){
+  try{
+    roster = await rpc('emp_roster');
+    const sel = $('empName');
+    sel.innerHTML = '<option value="">이름 선택</option>' + roster.map(r=>`<option>${esc(r.name)}</option>`).join('');
+  }catch(e){ msg($('empMsg'), e.message, 'err'); }
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+$('empDate').value = today;
+
+$('empName').onchange = () => {
+  const r = roster.find(x=>x.name===$('empName').value);
+  $('pinHint').textContent = r && !r.has_pin
+    ? '처음 사용하시는 분입니다. 지금 입력하는 숫자 4~8자리가 본인 개인번호로 등록됩니다. (잊지 않도록 기억해 주세요)'
+    : '본인 내역은 개인번호로만 볼 수 있습니다.';
+  resetSession();
+};
+$('empPin').oninput = resetSession;
+function resetSession(){
+  me = null; monthCache = {};
+  $('editorCard').classList.add('hidden'); $('histCard').classList.add('hidden');
+}
+
+async function fetchMonth(key){
+  const [from,to] = monthRange(key+'-01');
+  const rows = await rpc('emp_get', {p_name:me.name, p_pin:me.pin, p_from:from, p_to:to});
+  monthCache[key] = rows;
+  return rows;
+}
+
+$('btnLoad').onclick = async () => {
+  const name = $('empName').value, pin = $('empPin').value.trim(), date = $('empDate').value;
+  if (!name) return msg($('empMsg'),'이름을 선택해 주세요.','err');
+  if (!/^\d{4,8}$/.test(pin)) return msg($('empMsg'), ERR.bad_pin_format, 'err');
+  if (!date) return msg($('empMsg'),'날짜를 선택해 주세요.','err');
+  msg($('empMsg'),'확인 중…');
+  me = {name, pin}; monthCache = {};
+  try{
+    await fetchMonth(date.slice(0,7));
+    const r = roster.find(x=>x.name===name); if (r) r.has_pin = true;
+    msg($('empMsg'), '', '');
+    openDate(date);
+  }catch(e){ me = null; msg($('empMsg'), e.message, 'err'); }
+};
+
+$('empDate').onchange = async () => {
+  if (!me || !$('empDate').value) return;
+  try{ await openDate($('empDate').value); }catch(e){ msg($('empMsg'), e.message, 'err'); }
+};
+
+async function openDate(date){
+  const key = date.slice(0,7);
+  if (!monthCache[key]) await fetchMonth(key);
+  curDate = date; $('empDate').value = date;
+  const items = monthCache[key].filter(r=>r.log_date===date);
+  $('editorTitle').textContent = `업무일지 : ${me.name} (${date.replace(/-/g,'.')} ${wdOf(date)})`;
+  $('rows').innerHTML = '';
+  (items.length ? items : [{},{},{}]).forEach(it => addRow(it.content||'', it.hours==null?'':it.hours));
+  recalc(); msg($('saveMsg'),'');
+  $('editorCard').classList.remove('hidden');
+  histMonth = key; renderHist();
+}
+
+function addRow(content='', hours=''){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td class="no"></td>
+    <td><textarea rows="2" maxlength="2000" placeholder="업무 내용"></textarea></td>
+    <td class="hr"><input type="number" min="0" max="24" step="0.5" inputmode="decimal" placeholder="시간"></td>
+    <td class="x"><button class="sm" title="삭제" aria-label="항목 삭제">✕</button></td>`;
+  tr.querySelector('textarea').value = content;
+  tr.querySelector('input').value = hours;
+  tr.querySelector('input').oninput = recalc;
+  tr.querySelector('button').onclick = () => { tr.remove(); renumber(); recalc(); };
+  $('rows').appendChild(tr); renumber();
+}
+function renumber(){ [...$('rows').children].forEach((tr,i)=> tr.querySelector('.no').textContent = i+1); }
+function recalc(){
+  let s = 0; $('rows').querySelectorAll('input').forEach(i=>{ const v = parseFloat(i.value); if (!isNaN(v)) s += v; });
+  $('sumHours').textContent = fmtH(s);
+}
+$('btnAddRow').onclick = () => addRow();
+
+$('btnSave').onclick = async () => {
+  const items = [...$('rows').children].map(tr => ({
+    content: tr.querySelector('textarea').value.trim(),
+    hours: tr.querySelector('input').value
+  })).filter(x => x.content);
+  for (const it of items){
+    if (it.hours !== '' && (isNaN(+it.hours) || +it.hours < 0 || +it.hours > 24)) return msg($('saveMsg'),'투입시간은 0~24 사이 숫자로 입력해 주세요.','err');
+  }
+  if (!items.length && !confirm('입력된 내용이 없습니다. 이 날짜의 기존 내역이 삭제됩니다. 계속할까요?')) return;
+  const missing = items.filter(x=>x.hours==='').length;
+  $('btnSave').disabled = true; msg($('saveMsg'),'저장 중…');
+  try{
+    await rpc('emp_save', {p_name:me.name, p_pin:me.pin, p_date:curDate, p_items:items});
+    await fetchMonth(curDate.slice(0,7));
+    await openDate(curDate);
+    msg($('saveMsg'), (items.length ? '등록되었습니다.' : '삭제되었습니다.') + (missing ? ` (투입시간이 비어 있는 항목 ${missing}개)` : ''), 'ok');
+  }catch(e){ msg($('saveMsg'), e.message, 'err'); }
+  $('btnSave').disabled = false;
+};
+
+let histMonth = today.slice(0,7);
+function shiftMonth(key, d){ const [y,m] = key.split('-').map(Number); const x = new Date(y, m-1+d, 1); return x.getFullYear()+'-'+pad(x.getMonth()+1); }
+async function renderHist(){
+  if (!me) return;
+  const rows = monthCache[histMonth];
+  $('histCard').classList.remove('hidden');
+  $('histTitle').textContent = `내 등록 내역 (${histMonth.replace('-','.')}월)`;
+  if (!rows) { $('histBody').innerHTML = '<tr><td colspan="4" class="hint">불러오는 중…</td></tr>'; return; }
+  const by = {}; rows.forEach(r => (by[r.log_date] = by[r.log_date] || []).push(r));
+  const dates = Object.keys(by).sort();
+  $('histBody').innerHTML = dates.length ? dates.map(d => {
+    const its = by[d], tot = its.reduce((a,r)=>a+(r.hours||0),0);
+    return `<tr class="d" data-d="${d}"><td class="c">${md(d)}</td><td class="c">${wdOf(d)}</td>
+      <td class="pre">${its.map((r,i)=>`${i+1}. ${esc(r.content)}${r.hours!=null?` (${fmtH(r.hours)}h)`:''}`).join('\n')}</td>
+      <td class="c">${fmtH(tot)}</td></tr>`;
+  }).join('') : '<tr><td colspan="4" class="hint">등록된 내역이 없습니다.</td></tr>';
+  $('histBody').querySelectorAll('tr.d').forEach(tr => tr.onclick = () => { openDate(tr.dataset.d); window.scrollTo({top:0,behavior:'smooth'}); });
+}
+async function moveHist(d){
+  histMonth = shiftMonth(histMonth, d);
+  if (!monthCache[histMonth]){ renderHist(); try{ await fetchMonth(histMonth); }catch(e){ msg($('empMsg'), e.message,'err'); } }
+  renderHist();
+}
+$('histPrev').onclick = () => moveHist(-1); $('histNext').onclick = () => moveHist(1);
+
+/* =====================================================
+   관리자 화면
+   ===================================================== */
+let adminPw = null, admData = {roster:[], rows:[]}, admRange = {from:'',to:''};
+
+$('btnAdmLogin').onclick = async () => {
+  const pw = $('admPw').value;
+  if (!pw) return msg($('admLoginMsg'),'비밀번호를 입력해 주세요.','err');
+  const t = new Date(); const first = ymd(new Date(t.getFullYear(), t.getMonth(), 1));
+  $('admFrom').value = first; $('admTo').value = today;
+  msg($('admLoginMsg'),'확인 중…');
+  try{
+    adminPw = pw; await admQuery();
+    $('admPw').value = ''; msg($('admLoginMsg'),'');
+    $('admLogin').classList.add('hidden'); $('admMain').classList.remove('hidden');
+  }catch(e){ adminPw = null; msg($('admLoginMsg'), e.message, 'err'); }
+};
+$('admPw').addEventListener('keydown', e => { if (e.key==='Enter') $('btnAdmLogin').click(); });
+$('btnAdmLogout').onclick = () => {
+  adminPw = null; admData = {roster:[], rows:[]};
+  $('admMain').classList.add('hidden'); $('admLogin').classList.remove('hidden');
+};
+
+async function admQuery(){
+  const from = $('admFrom').value, to = $('admTo').value;
+  if (!from || !to || from > to) throw new Error('조회 기간을 확인해 주세요.');
+  admData = await rpc('admin_get', {p_pw:adminPw, p_from:from, p_to:to});
+  admRange = {from, to};
+  const keep = $('admEmp').value;
+  $('admEmp').innerHTML = '<option value="">전체 직원</option>' + admData.roster.map(r=>`<option>${esc(r.name)}</option>`).join('');
+  if (admData.roster.some(r=>r.name===keep)) $('admEmp').value = keep;
+  if (!$('admChk').value || $('admChk').value < from || $('admChk').value > to) $('admChk').value = to;
+  renderAdmin();
+}
+$('btnAdmQuery').onclick = async () => {
+  msg($('admMsg'),'조회 중…');
+  try{ await admQuery(); msg($('admMsg'), `${admRange.from} ~ ${admRange.to} 조회 완료 (${admData.rows.length}건)`, 'ok'); }
+  catch(e){ msg($('admMsg'), e.message, 'err'); if (e.code==='bad_password'||e.code==='locked') $('btnAdmLogout').click(); }
+};
+$('admEmp').onchange = renderAdmin; $('admChk').onchange = renderChk;
+
+function filteredRows(){ const n = $('admEmp').value; return admData.rows.filter(r => !n || r.emp_name===n); }
+
+function renderAdmin(){
+  const rows = filteredRows();
+  $('admBody').innerHTML = rows.length ? rows.map(r =>
+    `<tr><td class="c">${md(r.log_date)}</td><td class="c">${wdOf(r.log_date)}</td><td class="c">${esc(r.emp_name)}</td>
+     <td class="c">${r.seq}</td><td class="pre">${esc(r.content)}</td><td class="c">${r.hours==null?'':fmtH(r.hours)}</td></tr>`).join('')
+    : '<tr><td colspan="6" class="hint">내역이 없습니다.</td></tr>';
+  const names = $('admEmp').value ? [$('admEmp').value] : admData.roster.map(r=>r.name);
+  $('sumBody').innerHTML = names.map(n => {
+    const rs = admData.rows.filter(r=>r.emp_name===n);
+    return `<tr><td class="c">${esc(n)}</td><td class="c">${new Set(rs.map(r=>r.log_date)).size}</td><td class="c">${fmtH(rs.reduce((a,r)=>a+(r.hours||0),0))}</td></tr>`;
+  }).join('');
+  renderChk(); renderMgr();
+}
+function renderChk(){
+  const d = $('admChk').value;
+  if (!d || d < admRange.from || d > admRange.to){ $('chkBox').innerHTML = '<span class="hint">조회 기간 안의 날짜를 선택해 주세요.</span>'; return; }
+  const done = new Set(admData.rows.filter(r=>r.log_date===d).map(r=>r.emp_name));
+  $('chkBox').innerHTML = admData.roster.map(r => `<span class="chip ${done.has(r.name)?'':'no'}">${esc(r.name)} ${done.has(r.name)?'제출':'미제출'}</span>`).join('');
+}
+function renderMgr(){
+  $('empMgrBody').innerHTML = admData.roster.map(r => `<tr><td class="c">${esc(r.name)}</td><td class="c">${r.has_pin?'설정됨':'미설정'}</td>
+    <td class="c"><button class="sm" data-a="reset" data-n="${esc(r.name)}">번호 초기화</button> <button class="sm" data-a="del" data-n="${esc(r.name)}">삭제</button></td></tr>`).join('');
+  $('empMgrBody').querySelectorAll('button').forEach(b => b.onclick = async () => {
+    const n = b.dataset.n;
+    try{
+      if (b.dataset.a==='reset'){ if (!confirm(`${n} 님의 개인번호를 초기화할까요?`)) return; await rpc('admin_reset_pin',{p_pw:adminPw,p_name:n}); }
+      else { if (!confirm(`${n} 님과 이 직원의 업무일지 전체를 삭제할까요? 되돌릴 수 없습니다.`)) return; await rpc('admin_del_emp',{p_pw:adminPw,p_name:n}); }
+      await admQuery(); loadRoster();
+    }catch(e){ msg($('admMsg'), e.message, 'err'); }
+  });
+}
+$('btnAddEmp').onclick = async () => {
+  const n = $('newEmp').value.trim(); if (!n) return;
+  try{ await rpc('admin_add_emp',{p_pw:adminPw,p_name:n}); $('newEmp').value=''; await admQuery(); loadRoster(); }
+  catch(e){ msg($('admMsg'), e.message,'err'); }
+};
+
+/* ---------- 엑셀 추출 (첨부 서식과 동일한 형태) ---------- */
+$('btnExport').onclick = async () => {
+  if (typeof ExcelJS === 'undefined') return msg($('admMsg'),'엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.','err');
+  msg($('admMsg'),'엑셀 만드는 중…');
+  try{ await admQuery(); }catch(e){ return msg($('admMsg'), e.message, 'err'); }
+  const { from, to } = admRange;
+  const only = $('admEmp').value;
+  const names = (only ? [only] : admData.roster.map(r=>r.name));
+  const rows = admData.rows.filter(r => names.includes(r.emp_name));
+
+  const F = {name:'맑은 고딕', size:11};
+  const thin = {style:'thin'}; const BD = {top:thin,left:thin,bottom:thin,right:thin};
+  const HDR = {type:'pattern', pattern:'solid', fgColor:{argb:'FFDDEBF7'}};
+  const utc = s => { const [y,m,d] = s.split('-').map(Number); return new Date(Date.UTC(y,m-1,d)); };
+  const sameMonth = from.slice(0,7) === to.slice(0,7);
+  const period = from===to ? from.replace(/-/g,'.')
+               : sameMonth ? `${from.slice(0,4)}.${Number(from.slice(5,7))}월`
+               : `${from.replace(/-/g,'.')}~${to.slice(5).replace('-','.')}`;
+
+  const wb = new ExcelJS.Workbook();
+
+  // 1) 전체 종합 (한 줄에 한 건 - 필터/피벗용)
+  const all = wb.addWorksheet('전체 종합', {views:[{showGridLines:false}]});
+  [4,10.4,7.9,12,7.3,65.6,13].forEach((w,i)=> all.getColumn(i+1).width = w);
+  all.getCell('B2').value = `업무일지 종합 (${period})`; all.getCell('B2').font = {...F, bold:true};
+  ['날짜','요일','직원','구분','내용','투입시간(Hr)'].forEach((h,i)=>{
+    const c = all.getCell(3, i+2); c.value = h; c.font = F; c.fill = HDR; c.border = BD; c.alignment = {horizontal:'center',vertical:'middle'};
+  });
+  rows.slice().sort((a,b)=> a.log_date.localeCompare(b.log_date) || names.indexOf(a.emp_name)-names.indexOf(b.emp_name) || a.seq-b.seq)
+    .forEach((r,i)=>{
+      const rn = 4+i;
+      const vals = [utc(r.log_date), wdOf(r.log_date), r.emp_name, r.seq, r.content, r.hours];
+      vals.forEach((v,j)=>{
+        const c = all.getCell(rn, j+2); c.value = v; c.font = F; c.border = BD;
+        c.alignment = {horizontal: j===4?'left':'center', vertical:'middle', wrapText: j===4};
+        if (j===0) c.numFmt = 'm"/"d;@';
+      });
+    });
+  all.autoFilter = {from:{row:3,column:2}, to:{row:3,column:7}};
+
+  // 2) 직원별 시트 (서식 그대로)
+  const used = new Set(['전체 종합']);
+  names.forEach(name => {
+    let sn = name.replace(/[\\\/\?\*\[\]:]/g,'').slice(0,28) || '직원'; let k = 2; while (used.has(sn)) sn = sn.slice(0,26)+'_'+(k++); used.add(sn);
+    const ws = wb.addWorksheet(sn, {views:[{showGridLines:false}], pageSetup:{orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0}});
+    [4,10.375,7.875,7.25,65.625,13,9].forEach((w,i)=> ws.getColumn(i+1).width = w);
+    ws.getCell('B2').value = `업무일지 : ${name} (${period})`; ws.getCell('B2').font = {...F, bold:true};
+    ['날짜','요일','구분','내용','투입시간(Hr)','시간 계'].forEach((h,i)=>{
+      const c = ws.getCell(3,i+2); c.value = h; c.font = F; c.fill = HDR; c.border = BD; c.alignment = {horizontal:'center',vertical:'middle'};
+    });
+    const mine = rows.filter(r=>r.emp_name===name);
+    const dset = new Set(mine.map(r=>r.log_date));
+    for (let d = parse(from); ymd(d) <= to; d.setDate(d.getDate()+1)){ if (d.getDay()>0 && d.getDay()<6) dset.add(ymd(d)); }
+    let rn = 4;
+    [...dset].sort().forEach(ds => {
+      const its = mine.filter(r=>r.log_date===ds).sort((a,b)=>a.seq-b.seq);
+      const n = Math.max(2, its.length), s = rn, e = rn+n-1;
+      for (let i=0;i<n;i++){
+        const it = its[i];
+        const cells = [null,null, it?i+1:null, it?it.content:null, it?it.hours:null, null];
+        for (let j=0;j<6;j++){
+          const c = ws.getCell(rn+i, j+2); c.font = F; c.border = BD;
+          c.alignment = {horizontal: j===3?'left':'center', vertical:'middle', wrapText: j===3};
+          if (cells[j]!==null) c.value = cells[j];
+        }
+      }
+      const b = ws.getCell(s,2); b.value = utc(ds); b.numFmt = 'm"/"d;@';
+      ws.getCell(s,3).value = wdOf(ds);
+      if (its.length) ws.getCell(s,7).value = {formula:`SUM(F${s}:F${e})`};
+      ws.mergeCells(s,2,e,2); ws.mergeCells(s,3,e,3); ws.mergeCells(s,7,e,7);
+      rn = e+1;
+    });
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  a.download = `업무일지_${only ? only+'_' : ''}${from.replace(/-/g,'')}${from===to?'':'-'+to.replace(/-/g,'')}.xlsx`;
+  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  msg($('admMsg'),'엑셀 파일을 내려받았습니다.','ok');
+};
+
+loadRoster();
+</script>
+</body>
+</html>
