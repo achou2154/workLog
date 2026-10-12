@@ -1744,9 +1744,9 @@ function renderCardMy(yr, mo) {
   // 미저장 상태: empId+yr+mo 기반 고유 임시키 사용 (월/직원 간 충돌 방지)
   const TEMP_KEY = `_NEW_${empId}_${yr}_${mo}`;
   const KEY = headerId || TEMP_KEY;
-  // 기존 _NEW_ 키로 저장된 행을 이 KEY로 마이그레이션
+  // 기존 _NEW_ 키로 저장된 행을 이 KEY로 마이그레이션 (startsWith로 모든 TEMP_KEY 패턴 처리)
   if(!headerId){
-    (db.cardRows||[]).filter(r=>r.headerId==='_NEW_').forEach(r=>{ r.headerId=KEY; });
+    (db.cardRows||[]).filter(r=>String(r.headerId).startsWith('_NEW_')).forEach(r=>{ r.headerId=KEY; });
   }
   const ccRows = getCardRows(KEY,'개인카드', yr, mo);
   const ctRows = getCardRows(KEY,'교통비', yr, mo);
@@ -2333,13 +2333,25 @@ async function ensureCardHeader(status) {
   const row={emp_id:empId,year:yr,month:mo,bank_name:bankName,account_number:accountNumber,account_holder:accountHolder,status,updated_at:new Date().toISOString()};
   if (status==='제출') row.submitted_at=new Date().toISOString();
   let headerId=window._cardHeaderId;
-  if (!headerId) {
-    const ins=await sbInsert('card_expense_headers',row);
-    if (!ins) return null;
-    headerId=ins.id;
-    db.cardHeaders=db.cardHeaders||[];
-    db.cardHeaders.push({id:headerId,empId,year:yr,month:mo,bankName,accountNumber,accountHolder,status,submittedAt:row.submitted_at||null});
-    window._cardHeaderId=headerId;
+  // TEMP_KEY(_NEW_로 시작)는 실제 DB ID가 아니므로 INSERT 필요
+  const isTempKey = !headerId || String(headerId).startsWith('_NEW_');
+  if (isTempKey) {
+    // 혹시 DB에 이미 같은 emp_id/year/month 헤더가 있으면 재사용
+    const existing = (db.cardHeaders||[]).find(h=>String(h.empId)===String(empId)&&h.year===yr&&h.month===mo);
+    if (existing) {
+      headerId = existing.id;
+      await sbUpdate('card_expense_headers',headerId,row);
+      const h=db.cardHeaders.find(h=>h.id===headerId);
+      if(h){h.bankName=bankName;h.accountNumber=accountNumber;h.accountHolder=accountHolder;h.status=status;}
+      window._cardHeaderId=headerId;
+    } else {
+      const ins=await sbInsert('card_expense_headers',row);
+      if (!ins) return null;
+      headerId=ins.id;
+      db.cardHeaders=db.cardHeaders||[];
+      db.cardHeaders.push({id:headerId,empId,year:yr,month:mo,bankName,accountNumber,accountHolder,status,submittedAt:row.submitted_at||null});
+      window._cardHeaderId=headerId;
+    }
   } else {
     await sbUpdate('card_expense_headers',headerId,row);
     const h=db.cardHeaders.find(h=>h.id===headerId);
@@ -2392,13 +2404,17 @@ async function saveCardRowsToDb(headerId, ccRows, ctRows) {
 
 async function saveCardDraft() {
   const ccRows=collectCardRows('cc'), ctRows=collectCardRows('ct');
+  console.log('[saveCardDraft] 시작 - _cardHeaderId:', window._cardHeaderId, '| empId:', window._cardEmpId, '| yr:', window._cardYr, '| mo:', window._cardMo);
+  console.log('[saveCardDraft] ccRows:', ccRows.length, '개 | ctRows:', ctRows.length, '개');
   showToast('⏳ 저장 중...');
   const headerId=await ensureCardHeader('작성중');
+  console.log('[saveCardDraft] ensureCardHeader 결과 headerId:', headerId);
   if(!headerId){showToast('⚠️ 저장 실패 — 네트워크 또는 권한 오류');return;}
   await saveCardRowsToDb(headerId,ccRows,ctRows);
   // 저장 후 DB에서 최신 데이터 다시 로드하여 화면 갱신
   await reloadCardData();
   showToast('💾 저장 완료');
+  console.log('[saveCardDraft] 완료 - 최종 _cardHeaderId:', window._cardHeaderId);
   renderCard();
 }
 
