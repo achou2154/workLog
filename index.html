@@ -506,6 +506,11 @@ async function sbInsert(table, row) {
 }
 async function sbUpdate(table, id, row) {
   if (!_supa) return false;
+  // TEMP_KEY가 id로 들어오면 DB 오류 방지
+  if (!id || String(id).startsWith('_NEW_')) {
+    console.error(`sbUpdate 차단: TEMP_KEY가 id로 전달됨 (table=${table}, id=${id})`);
+    return false;
+  }
   const { data, error } = await _supa.from(table).update(row).eq('id', id).select();
   if (error) { console.error('update error:', error); return false; }
   if (!data || data.length === 0) {
@@ -2814,13 +2819,24 @@ async function _saveCardAdminModal(status) {
   const row={emp_id:empId,year:yr,month:mo,bank_name:bankName,account_number:accountNumber,account_holder:accountHolder,status,updated_at:new Date().toISOString()};
   if(status==='제출') row.submitted_at=new Date().toISOString();
   let headerId=window._cardHeaderId;
-  if(!headerId){
-    const ins=await sbInsert('card_expense_headers',row);
-    if(!ins){showToast('⚠️ 저장 실패');return null;}
-    headerId=ins.id;
-    db.cardHeaders=db.cardHeaders||[];
-    db.cardHeaders.push({id:headerId,empId,year:yr,month:mo,bankName,accountNumber,accountHolder,status});
-    window._cardHeaderId=headerId;
+  // TEMP_KEY(_NEW_로 시작)는 실제 DB ID가 아니므로 INSERT 필요
+  const isTempKey = !headerId || String(headerId).startsWith('_NEW_');
+  if(isTempKey){
+    const existing=(db.cardHeaders||[]).find(h=>String(h.empId)===String(empId)&&h.year===yr&&h.month===mo);
+    if(existing){
+      headerId=existing.id;
+      await sbUpdate('card_expense_headers',headerId,row);
+      const h=db.cardHeaders.find(h=>h.id===headerId);
+      if(h){h.bankName=bankName;h.accountNumber=accountNumber;h.accountHolder=accountHolder;h.status=status;}
+      window._cardHeaderId=headerId;
+    } else {
+      const ins=await sbInsert('card_expense_headers',row);
+      if(!ins){showToast('⚠️ 저장 실패');return null;}
+      headerId=ins.id;
+      db.cardHeaders=db.cardHeaders||[];
+      db.cardHeaders.push({id:headerId,empId,year:yr,month:mo,bankName,accountNumber,accountHolder,status});
+      window._cardHeaderId=headerId;
+    }
   } else {
     await sbUpdate('card_expense_headers',headerId,row);
     const h=db.cardHeaders.find(h=>h.id===headerId);
